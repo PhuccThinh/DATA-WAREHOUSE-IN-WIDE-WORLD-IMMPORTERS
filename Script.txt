@@ -1,0 +1,228 @@
+﻿
+------------------ STAGING TABLE-------------------------
+
+--Customer Staging  table--
+CREATE TABLE [dbo].[Stg_Customer](
+	[CustomerID] [int] PRIMARY KEY,
+	[CustomerName] [nvarchar](255) NOT NULL,
+	[CustomerCategoryName] [nvarchar](50) NOT NULL,
+	[Modified_day] [datetime] NOT NULL,
+	[DeliveryLocation] [nvarchar](50) NULL
+)
+
+--Stock Item Staging Table--
+CREATE TABLE [dbo].[stg_StockItem](
+	[StockItemID] [int] PRIMARY KEY NOT NULL,
+	[StockItemName] [nvarchar](255) NULL,
+	[UnitPrice] [decimal](18, 2) NULL,
+	[ModifiedDate] [datetime] NOT NULL,
+)
+
+--Supplier Staging Table--
+CREATE TABLE [dbo].[stg_Supplier](
+	[SupplierID] [int] PRIMARY KEY,
+	[SupplierName] [nvarchar](255) NOT NULL,
+	[SupplierCategoryName] [nvarchar](50) NOT NULL,
+	[ModifiedDay] [datetime] NOT NULL
+)
+
+
+--City Staging Table--
+CREATE TABLE [dbo].[stg_City](
+	[WWICityID] [int] PRIMARY KEY,
+	[Country] [nvarchar](255) NULL,
+	[Continent] [nvarchar](255) NULL,
+	[Region] [nvarchar](255) NULL,
+	[ModifiedDate] [datetime] NOT NULL,
+	[Location] [nvarchar](50) NULL,
+	[City] [nvarchar](50) NULL
+)
+
+-------------------- DIM TABLE---------------------------
+
+--Dim Customer Table-- 
+CREATE TABLE Dim_Customer(
+	[CustomerKey] [int] IDENTITY(1,1) NOT NULL,
+	[CustomerID] [int] NOT NULL,
+	[CustomerName] [nvarchar](255) NULL,
+	[CustomerCategoryName] [nvarchar](50) NULL,
+	[StartDate] [datetime] NULL,
+	[EndDate] [datetime] NULL,
+	[DeliveryLocation] [nvarchar](50) NULL,
+)
+
+--Dim StockItem Table-- 
+CREATE TABLE [dbo].[Dim_StockItem](
+	[StockItemKey] [int] IDENTITY(1,1) NOT NULL,
+	[StockItemID] [int] NOT NULL,
+	[StockItemName] [nvarchar](255) NULL,
+	[UnitPrice] [decimal](18, 2) NULL,
+	[StartDate] [datetime] NULL,
+	[EndDate] [datetime] NULL,
+)
+
+--Dim Supplier Table-- 
+CREATE TABLE [dbo].[DimSupplier](
+	[SupplierKey] [int] IDENTITY(1,1) NOT NULL,
+	[SupplierID] [int] NOT NULL,
+	[SupplierName] [nvarchar](255) NOT NULL,
+	[SupplierCategoryName] [nvarchar](50) NOT NULL,
+	[StarDate] [datetime] NULL,
+	[EndDate] [datetime] NULL,
+)
+
+--Dim City Table--
+CREATE TABLE [dbo].[DimCity](
+	[CityKey] [int] IDENTITY(1,1) NOT NULL,
+	[WWICityID] [int] NULL,
+	[Country] [nvarchar](255) NULL,
+	[Continent] [nvarchar](255) NULL,
+	[Region] [nvarchar](255) NULL,
+	[StartDate] [datetime] NULL,
+	[EndDate] [datetime] NULL,
+	[Location] [nvarchar](50) NULL,
+	[City] [nvarchar](50) NULL,
+)
+
+
+--Create Dim Date--
+DECLARE @StartDate date = '20130101';
+DECLARE @Year int = 4;
+DECLARE @CutoffDate date = DATEADD(DAY, -1, DATEADD(YEAR, @Year, @StartDate));
+
+;WITH seq(n) AS 
+(
+  SELECT 0 UNION ALL SELECT n + 1 FROM seq
+  WHERE n < DATEDIFF(DAY, @StartDate, @CutoffDate)
+),
+d(d) AS 
+(
+  SELECT DATEADD(DAY, n, @StartDate) FROM seq
+),
+src AS
+(
+  SELECT
+    DateKey         	= CONVERT(date, d),
+    TheDay         		= DATEPART(DAY,       d),
+    TheDayName      	= DATENAME(WEEKDAY,   d),
+    TheWeek         	= DATEPART(WEEK,      d),
+    TheISOWeek      	= DATEPART(ISO_WEEK,  d),
+    TheDayOfWeek    	= DATEPART(WEEKDAY,   d),
+    TheMonth        	= DATEPART(MONTH,     d),
+    TheMonthName    	= DATENAME(MONTH,     d),
+    TheQuarter      	= DATEPART(Quarter,   d),
+    TheYear         	= DATEPART(YEAR,      d),
+    TheFirstOfMonth 	= DATEFROMPARTS(YEAR(d), MONTH(d), 1),
+    TheLastOfYear   	= DATEFROMPARTS(YEAR(d), 12, 31),
+    TheDayOfYear    	= DATEPART(DAYOFYEAR, d)
+  FROM d
+)
+
+SELECT * 
+INTO DimDate
+FROM src
+ORDER BY DateKey
+OPTION (MAXRECURSION 0)
+
+----------------------Fact Sale--------------------------
+CREATE TABLE Fact_Sale (
+    SaleKey INT IDENTITY(1,1) PRIMARY KEY,
+    CustomerKey INT,
+	CityKey Int,
+    StockItemKey INT,
+    SupplierKey INT,
+    InvoiceDateKey date ,
+    WWIInvoiceID INT,
+    Description NVARCHAR(255),
+    Quantity INT,
+    UnitPrice DECIMAL(18, 2),
+    Profit DECIMAL(18, 2),
+    -- Các cột khác mà bạn cần thêm
+    FOREIGN KEY (CustomerKey) REFERENCES DimCustomer(CustomerKey),
+    FOREIGN KEY (StockItemKey) REFERENCES Dim_StockItem(StockItemKey),
+    FOREIGN KEY (SupplierKey) REFERENCES DimSupplier(SupplierKey),
+    FOREIGN KEY (InvoiceDateKey) REFERENCES Dim_Date([Date]),
+	FOREIGN KEY (CityKey) REFERENCES DimCity([CityKey])
+)
+
+----------------------- MDX------------------------------
+
+--1)  Thời điểm nào trong năm đem lại doanh thu cao nhất?
+SELECT 
+	[Measures].[Profit] ON COLUMNS,
+	TopCount([Dim Date].[Month].[Month].Members, 6, [Measures].[Profit]) ON ROWS
+FROM [WWI DW]
+
+--2) Những sản phẩm bán chạy nhất là gì?
+select
+[Measures].[Quantity] on columns,
+TopCount([Dim Stock Item].[Stock Item Name].[Stock Item Name].members, 5, [Measures].[Quantity]) on rows
+from [WWI DW]
+
+--3) Những sản phẩm bán chạy chủ yếu tập trung ở đâu?
+SELECT
+TOPCOUNT(
+NONEMPTY(
+[Dim Stock Item].[Stock Item Name].[Stock Item Name].MEMBERS, [Measures].[Quantity]), 5, [Measures].[Quantity]) ON rows,
+TOPCOUNT(
+NONEMPTY(
+[Dim City].[City].[City].MEMBERS, [Measures].[Quantity]), 6, [Measures].[Quantity]) ON columns
+FROM [WWI DW]
+WHERE ([Measures].[Quantity])
+
+--4) Những sản phẩm nào đem lại lợi nhuận cao nhất?
+select
+[Measures].[Profit] on columns,
+TopCount([Dim Stock Item].[Stock Item Name].[Stock Item Name].members, 5, [Measures].[Profit]) on rows
+from [WWI DW]
+
+--5) Những sản phẩm đem lại lợi nhuận cao nhất chủ yếu tập trung ở đâu?
+SELECT
+TOPCOUNT(
+NONEMPTY(
+[Dim Stock Item].[Stock Item Name].[Stock Item Name].MEMBERS, [Measures].[Quantity]), 5, [Measures].[Profit]) ON rows,
+TOPCOUNT(
+NONEMPTY(
+[Dim City].[City].[City].MEMBERS, [Measures].[Profit]), 6, [Measures].[Profit]) ON columns
+FROM [WWI DW]
+WHERE ([Measures].[Profit])
+
+--6) Thống kê tần suất mua của các nhóm khách hàng theo từng năm
+with member [Dim Date].[Fiscal Year].[Total] as
+aggregate(
+{
+[Dim Date].[Fiscal Year].&[2013],
+[Dim Date].[Fiscal Year].&[2014],
+[Dim Date].[Fiscal Year].&[2015],
+[Dim Date].[Fiscal Year].&[2016]
+}
+)
+select
+[Dim Customer].[Customer Category Name].[Customer Category Name].members on columns,
+{
+[Dim Date].[Fiscal Year].&[2013],
+[Dim Date].[Fiscal Year].&[2014],
+[Dim Date].[Fiscal Year].&[2015],
+[Dim Date].[Fiscal Year].&[2016],
+[Dim Date].[Fiscal Year].[Total]
+} on rows
+from [WWI DW]
+where [Measures].[Fact Sale Count]
+
+--7) Những sản phẩm bán chạy nhất thuộc về nhà cung cấp nào?
+WITH
+SET Top5Suppliers AS
+TOPCOUNT(
+NONEMPTY([Dim Supplier].[Supplier Name].[Supplier Name].MEMBERS, [Measures].[Quantity]),
+5,
+[Measures].[Quantity]
+)
+SELECT
+FILTER(
+TOPCOUNT(
+NONEMPTY(
+[Dim Stock Item].[Stock Item Name].[Stock Item Name].MEMBERS, [Measures].[Quantity]), 5, [Measures].[Quantity]),
+NOT IsEmpty([Measures].[Quantity])
+) ON COLUMNS,
+{[Top5Suppliers]} ON ROWS
+FROM [WWI DW]
